@@ -14,7 +14,7 @@ export const getCiclosAlumnosController = async (req, res) => {
       LEFT JOIN alumnos a   ON a.id_alumno = ga.id_alumno 
       LEFT JOIN planteles p ON p.id_plantel = g.id_plantel 
       LEFT JOIN ciclos c    ON c.id_ciclo = g.id_ciclo
-      WHERE g.id_ciclo = 234
+      WHERE g.id_ciclo = ?
       AND ga.id_alumno NOT IN (
         SELECT ga2.id_alumno 
           FROM gruposalumnos ga2 
@@ -31,7 +31,7 @@ export const getCiclosAlumnosController = async (req, res) => {
       [id_ciclo]
     );
 
-    console.log(alumnosResult);
+    console.log("RES: ", alumnosResult);
 
     const alumnos = await alumnosResult.map((row) => ({
       id_alumno: row.id_alumno,
@@ -42,21 +42,38 @@ export const getCiclosAlumnosController = async (req, res) => {
       vendedora: row.vendedora,
     }));
 
-    for (let alumno of alumnos) {
-      const ciclosResult = await pool.query(
-        `SELECT COUNT(DISTINCT c2.id_ciclo) as ciclos 
-    FROM gruposalumnos ga2 
-    LEFT JOIN grupos g2 ON g2.id_grupo = ga2.id_grupo
-    LEFT JOIN ciclos c2 ON c2.id_ciclo = g2.id_ciclo
-    LEFT JOIN ciclos c ON c.id_ciclo = ?
-    WHERE ga2.id_alumno = ? AND c2.fecha_inicio_ciclo >= c.fecha_inicio_ciclo`,
-        [id_ciclo, alumno.id_alumno]
-      );
+    const alumnoId = await alumnosResult.map((row) => row.id_alumno);
+    console.log(alumnoId);
+    const ciclosResult = await pool.query(
+      `SELECT ga.id_alumno, COUNT(DISTINCT c2.id_ciclo) as ciclos 
+      FROM gruposalumnos ga 
+      LEFT JOIN grupos g ON g.id_grupo = ga.id_grupo 
+      LEFT JOIN ciclos c2 ON c2.id_ciclo = g.id_ciclo 
+      WHERE ga.id_alumno IN (?)
+      AND c2.fecha_inicio_ciclo > (
+        SELECT fecha_inicio_ciclo FROM ciclos WHERE id_ciclo = ?
+      ) 
+      AND c2.ciclo NOT LIKE '%INVER%' 
+      AND c2.ciclo NOT LIKE '%CAMBIOS%' 
+      AND c2.ciclo NOT LIKE '%INDUCCION%' 
+      AND c2.ciclo NOT LIKE '%EXCI%' 
+      AND c2.ciclo NOT LIKE '%CLASES%' 
+      GROUP BY ga.id_alumno`,
+      [alumnoId, id_ciclo]
+    );
+    console.log(ciclosResult[0]);
 
-      alumno.ciclos = ciclosResult[0][0].ciclos;
-    }
+    const ciclosPorAlumno = [];
+    ciclosResult[0].map((row) => {
+      ciclosPorAlumno[row.id_alumno] = row.ciclos;
+    });
 
-    res.json({ alumnos });
+    const alumnosConCiclos = alumnos.map((alumno) => ({
+      ...alumno,
+      ciclos: ciclosPorAlumno[alumno.id_alumno] || 0,
+    }));
+
+    res.json(alumnosConCiclos);
   } catch (error) {
     res.status(500).json({ error: "Error de servidor" });
     console.log(error);

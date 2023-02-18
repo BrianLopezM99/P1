@@ -31,7 +31,7 @@ export const getCiclosAlumnosController = async (req, res) => {
       [id_ciclo]
     );
 
-    console.log("RES: ", alumnosResult);
+    //console.log("RES: ", alumnosResult);
 
     const alumnos = await alumnosResult.map((row) => ({
       id_alumno: row.id_alumno,
@@ -42,8 +42,23 @@ export const getCiclosAlumnosController = async (req, res) => {
       vendedora: row.vendedora,
     }));
 
+    //console.log("ALUMNO: ", alumnos);
+
     const alumnoId = await alumnosResult.map((row) => row.id_alumno);
-    console.log(alumnoId);
+
+    // Obtener información de los abandonos por nivel
+    const [abandonosPorNivelResult] = await pool.query(
+      `SELECT n.nivel, COUNT(DISTINCT ga.id_alumno) AS abandonos 
+      FROM niveles n 
+      LEFT JOIN grupos g ON g.id_nivel = n.id_nivel 
+      LEFT JOIN ciclos c ON c.id_ciclo = g.id_ciclo 
+      LEFT JOIN gruposalumnos ga ON ga.id_grupo = g.id_grupo AND ga.id_alumno IN (?) 
+      WHERE c.fecha_fin_ciclo IS NOT NULL 
+      AND c.id_ciclo < ?
+      GROUP BY n.nivel`,
+      [alumnoId, id_ciclo]
+    );
+
     const ciclosResult = await pool.query(
       `SELECT ga.id_alumno, COUNT(DISTINCT c2.id_ciclo) as ciclos 
       FROM gruposalumnos ga 
@@ -61,7 +76,33 @@ export const getCiclosAlumnosController = async (req, res) => {
       GROUP BY ga.id_alumno`,
       [alumnoId, id_ciclo]
     );
-    console.log(ciclosResult[0]);
+
+    const [abandonosPorVendedoraResult] = await pool.query(
+      `SELECT u.nombre_completo AS vendedora, a.nombre AS alumno, a.id_alumno, COUNT(DISTINCT ga.id_alumno) AS abandonos 
+      FROM gruposalumnos ga 
+      LEFT JOIN grupos g ON g.id_grupo = ga.id_grupo 
+      LEFT JOIN ciclos c ON c.id_ciclo = g.id_ciclo 
+      LEFT JOIN usuarios u ON u.id_usuario = ga.id_usuario_ultimo_cambio
+      LEFT JOIN alumnos a ON a.id_alumno = ga.id_alumno
+      WHERE c.fecha_fin_ciclo IS NOT NULL 
+      AND c.id_ciclo < ?
+      AND ga.id_alumno IN (?)
+      GROUP by vendedora, alumno, a.id_alumno`,
+      [id_ciclo, alumnoId]
+    );
+    
+    const abandonosPorVendedora = {};
+    abandonosPorVendedoraResult.forEach((row) => {
+      abandonosPorVendedora[row.vendedora] = row.abandonos;
+      console.log(row)
+    });
+
+    console.log(abandonosPorNivelResult)
+    const abandonosPorNivel = {};
+    abandonosPorNivelResult.forEach((row) => {
+      abandonosPorNivel[row.nivel] = row.abandonos;
+      console.log(row)
+    });
 
     const ciclosPorAlumno = [];
     ciclosResult[0].map((row) => {
@@ -73,7 +114,7 @@ export const getCiclosAlumnosController = async (req, res) => {
       ciclos: ciclosPorAlumno[alumno.id_alumno] || 0,
     }));
 
-    res.json(alumnosConCiclos);
+    res.json({alumnosConCiclos, abandonosPorVendedoraResult, abandonosPorNivelResult});
   } catch (error) {
     res.status(500).json({ error: "Error de servidor" });
     console.log(error);
